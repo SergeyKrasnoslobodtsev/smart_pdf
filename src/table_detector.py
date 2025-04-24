@@ -1,10 +1,9 @@
-import sys
 import cv2 as cv
 import numpy as np
 
 from typing import Any, Dict, List, Tuple
 
-from table_structure import (Table, Row, Cell)
+from table_structure import (Table, Cell)
 
 
 class TableDetector():
