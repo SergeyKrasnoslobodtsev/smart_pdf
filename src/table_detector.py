@@ -104,7 +104,7 @@ def draw_table(image: np.ndarray, tables: List[Table]) -> np.ndarray:
 def main():
     from pdf2image import convert_from_path
     # Пример использования
-    FILE = 'pdf/ЕВР-НКАЗ.pdf'
+    FILE = './pdf/АС Евросибэнерго-НКАЗ.pdf'
     
     images = convert_from_path(FILE, dpi=400)
 

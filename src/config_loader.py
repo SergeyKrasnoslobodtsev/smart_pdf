@@ -6,21 +6,23 @@ from typing import Dict, Type, TypeVar, Any
 
 @dataclass
 class BlurValues:
-    sharpness: float
+    score_blurredness: float
+@dataclass
+class OverExposureValues:
+    score_contrast: float
+    score_luminosity: float 
+@dataclass
+class UnderExposureValues:
+    score_contrast: float
+    score_luminosity: float 
 
 @dataclass
 class NoiseValues:
     sharpness: float
-    entropy: float = 0.0  # по необходимости
-
-@dataclass
-class OverExposureValues:
-    light_ratio: float
-    dark_ratio: float
-
-@dataclass
-class UnderExposureValues:
-    dark_ratio: float
+    ssim: float = 0.0
+    entropy: float = 0.0
+    dark_ratio: float = 0.0
+    contrast: float = 0.0
 
 @dataclass
 class ContrastValues:
@@ -146,7 +148,7 @@ def load_config(path: str, config_type: Type[T]) -> T:
 
 if __name__ == "__main__":
     config = load_config("./config/quality_thresholds.yaml", ImageQualityConfig)
-    print(config.blur.high.values.sharpness)
+    print(config.blur.high.values.score_blurredness)
     print(config.noise.gaussian.high.values.entropy)
     print(config.overexposure.high.values.dark_ratio)
     print(config.underexposure.high.message)

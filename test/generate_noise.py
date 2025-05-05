@@ -5,7 +5,7 @@ import numpy as np
 def generate_blurred_images(image: np.ndarray) -> List[np.ndarray]:
     """Генерация тестовых изображений с различными уровнями размытия (Gaussian blur)."""
     import cv2
-    blur_levels = [0, 3, 7, 11, 15]  # 0 - без размытия, далее увеличивается радиус ядра
+    blur_levels = [0, 3, 7, 11, 33]  # 0 - без размытия, далее увеличивается радиус ядра
     test_images = []
     for ksize in blur_levels:
         if ksize == 0:
@@ -39,11 +39,14 @@ def generate_under_exposed_images(image: np.ndarray) -> List[np.ndarray]:
 
 def generate_salt_and_pepper_noise(image: np.ndarray) -> List[np.ndarray]:
     """Генерация тестовых изображений с различными уровнями шума соль-перец."""
-
-    noise_levels = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05] # Уровни шума
+    noise_levels = [0.0, 0.01, 0.02, 0.03, 0.04, 0.05]  # Уровни шума
 
     noisy_images = []
     for level in noise_levels:
+        if level == 0.0:
+            noisy_images.append(image.copy())  # Оставляем оригинал без изменений
+            continue
+
         noisy_image = image.copy()
         num_salt = np.ceil(level * image.size * 0.5)
         coords = [np.random.randint(0, i - 1, int(num_salt)) for i in image.shape]
@@ -67,3 +70,14 @@ def generate_gaussian_noise(image: np.ndarray) -> List[np.ndarray]:
         noisy_image = cv2.add(image, noise)
         noisy_images.append(noisy_image)
     return noisy_images
+
+def generate_contrast_images(image: np.ndarray) -> List[np.ndarray]:
+    """Генерация тестовых изображений с различными уровнями контрастности."""
+    import cv2
+    contrast_levels = [1.0, 1.5, 2.0, 2.5, 3.0] # Коэффициенты для изменения контрастности
+
+    contrast_images = []
+    for level in contrast_levels:
+        contrast_image = cv2.convertScaleAbs(image, alpha=level, beta=0)
+        contrast_images.append(contrast_image.astype(np.uint8))
+    return contrast_images

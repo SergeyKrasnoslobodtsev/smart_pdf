@@ -26,7 +26,6 @@ class IssueType(Enum):
 class ImageIssue:
     type: IssueType
     level: IssueLevel
-    metrics: Dict[str, float]
     recommendation: str
     details: Optional[Dict[str, Any]] = None
 
@@ -39,11 +38,10 @@ class ImageIssue:
         cls,
         type: IssueType,
         level: IssueLevel,
-        metrics: Dict[str, float],
         recommendation: str,
         details: Optional[Dict[str, Any]] = None
     ) -> "ImageIssue":
-        return cls(type=type, level=level, metrics=metrics, recommendation=recommendation, details=details)
+        return cls(type=type, level=level, recommendation=recommendation, details=details)
 
 
 
@@ -58,11 +56,10 @@ class ImageQualityReport:
         self,
         type: IssueType,
         level: IssueLevel,
-        metrics: Dict[str, float],
         recommendation: str,
         details: Optional[Dict[str, Any]] = None
     ) -> None:
-        issue = ImageIssue.create(type, level, metrics, recommendation, details)
+        issue = ImageIssue.create(type, level, recommendation, details)
         self.issues.append(issue)
         if issue.is_critical:
             self.has_critical_issues = True
@@ -91,6 +88,6 @@ class ImageQualityReport:
             prefix = prefix_map.get(issue.level, "")
             result.append(f"{prefix} {issue.type.description}: {issue.recommendation}")
         if any(i.is_critical for i in self.issues):
-            result.append("⚠️ Имеются критические проблемы. Повторное сканирование обязательно!")
+            result.append("⚠️  Имеются критические проблемы. Повторное сканирование обязательно!")
         return "\n".join(result)
     
