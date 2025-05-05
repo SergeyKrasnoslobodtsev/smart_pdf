@@ -92,7 +92,7 @@ def draw_table(image: np.ndarray, tables: List[Table]) -> np.ndarray:
                 cx, cy, cw, ch = cell.x, cell.y, cell.w, cell.h
                 cv.rectangle(image, (cx, cy), (cx + cw, cy + ch), (255, 0, 0), 1)
                           
-                text = f"{i}:{j}"
+                text = f"{i}:{j} - {cell.text}"
                 cv.putText(image, text,
                             (cell.x + 5, cell.y + 20),
                             cv.FONT_HERSHEY_SIMPLEX, 0.6,
