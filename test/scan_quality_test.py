@@ -19,7 +19,7 @@ from generate_noise import (
 )
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 import config_loader as cfg
-from scan_quality import ImageQualityAnalyzer
+from score_quality.image_quality_analizer import ImageQualityAnalyzer
 
 
 def run_quality_test(template: np.ndarray, images: np.ndarray, analyzer: ImageQualityAnalyzer, config_block, test_name="", image_labels=None):
