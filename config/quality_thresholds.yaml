@@ -11,7 +11,7 @@ blur:
       Пожалуйста, повторите сканирование с улучшенной фокусировкой.
   high:
     values:
-      score_blurredness: 0.3
+      score_blurredness: 0.4
     message: |
       Изображение сильно размыто.
       Рекомендуется повторное сканирование с улучшенной фокусировкой. 
@@ -40,7 +40,7 @@ overexposure:
       Пожалуйста, повторите сканирование с уменьшенной яркостью.
   high:
     values:
-      score_contrast: 0.3
+      score_contrast: 0.5
       score_luminosity: 0.95
     message: |
       Изображение имеет сильную передержку. 
@@ -49,7 +49,7 @@ overexposure:
       в пересвеченных областях (HDR Tone mapping).
   medium:
     values:
-      score_contrast: 0.6
+      score_contrast: 0.7
       score_luminosity: 0.95
     message: |
       Изображение имеет среднюю передержку. 
