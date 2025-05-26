@@ -50,15 +50,21 @@ class Test_TestPDFExtractor(unittest.TestCase):
                 ch = cell.bbox.y2
                 r = cell.row
                 c = cell.col
-                draw = common_test.draw_label(draw, F'R{r}:C{c} - {cell.text}', (cx, cy + 35))
+                draw = common_test.draw_label(draw, F'R{r}:C{c}', (cx, cy + 35))
                 draw.rectangle([(cx, cy), (cw, ch)], outline='green', width=2)
                 print(f'R{r}:C{c} - {cell.text}')
+                for line in cell.blobs:
+                    lx = line.x1
+                    ly = line.y1
+                    lw = line.x2
+                    lh = line.y2
+                    draw.rectangle([(lx, ly), (lw, lh)], outline='red', width=1)
         for id_p, parag in enumerate(page.paragraphs):
             x = parag.bbox.x1
             y = parag.bbox.y1
             w = parag.bbox.x2
             h = parag.bbox.y2
-            draw = common_test.draw_label(draw, F'{parag.type.name} - {parag.text}', (x, y + 35))
+            draw = common_test.draw_label(draw, F'{parag.type.name}', (x, y + 35))
             draw.rectangle([(x, y), (w, h)], outline='red', width=3) 
         image.show()
 

@@ -17,32 +17,42 @@ def has_line(region: np.ndarray, min_length: int, axis: int = 0) -> bool:
     Returns:
         True, если найден сегмент длиной >= min_length, иначе False.
     """
-    if axis == 0:
-        # поиск вдоль колонок
-        for x in range(region.shape[1]):
-            run = max_run = 0
-            for v in region[:, x]:
-                if v:
-                    run += 1
-                    max_run = max(max_run, run)
-                else:
-                    run = 0
-            if max_run >= min_length:
-                return True
-    else:
-        # поиск вдоль строк
-        for y in range(region.shape[0]):
-            run = max_run = 0
-            for v in region[y, :]:
-                if v:
-                    run += 1
-                    max_run = max(max_run, run)
-                else:
-                    run = 0
-            if max_run >= min_length:
-                return True
-    return False
+    if region.size == 0: # Проверка на пустой регион
+        return False
+    if min_length <= 0: # Минимальная длина должна быть положительной
+        return False
 
+    if axis == 0: # Поиск вертикальной линии (вдоль колонок региона)
+        if region.shape[0] < min_length: # Высота региона меньше требуемой длины линии
+            return False
+        for x_col in range(region.shape[1]): # Итерация по каждому столбцу в переданном регионе
+            run = 0
+            max_run = 0
+            for y_row in range(region.shape[0]): # Итерация вниз по текущему столбцу
+                if region[y_row, x_col]: # Если пиксель установлен (часть линии)
+                    run += 1
+                else:
+                    max_run = max(max_run, run)
+                    run = 0
+            max_run = max(max_run, run) # Проверка после окончания столбца
+            if max_run >= min_length:
+                return True # Найдена вертикальная линия достаточной длины
+    else: # Поиск горизонтальной линии (вдоль строк региона)
+        if region.shape[1] < min_length: # Ширина региона меньше требуемой длины линии
+            return False
+        for y_row in range(region.shape[0]): # Итерация по каждой строке в переданном регионе
+            run = 0
+            max_run = 0
+            for x_col in range(region.shape[1]): # Итерация поперек текущей строки
+                if region[y_row, x_col]: # Если пиксель установлен
+                    run += 1
+                else:
+                    max_run = max(max_run, run)
+                    run = 0
+            max_run = max(max_run, run) # Проверка после окончания строки
+            if max_run >= min_length:
+                return True # Найдена горизонтальная линия достаточной длины
+    return False
 
 
 def find_line_positions(mask: np.ndarray, axis: int) -> np.ndarray:

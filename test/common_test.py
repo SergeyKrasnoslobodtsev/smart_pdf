@@ -3,10 +3,10 @@ from typing import List, Tuple
 from PIL import Image
 from PIL.ImageDraw import ImageDraw
 from PIL import ImageFont
-import fitz
+import pymupdf
 
 # ---- настройка имён -----------------------------------------------------------
-SCAN_PDF_NAME = "РЖД 1000105113_072024.pdf"          # ожидаем True (скан)
+SCAN_PDF_NAME = "АС РУ- ВОСЬМОЙ ВЕТРОПАРК.pdf"          # ожидаем True (скан)
 STRUCTURED_PDF_NAME = "АСР СДД 2 кв.2024 (подп. к-а).pdf"  # ожидаем False (цифровой)
 # ------------------------------------------------------------------------------
 
@@ -39,11 +39,11 @@ def convert_to_pil(pdf_bytes: bytes) -> List[Image.Image]:
     Returns:
         List[Image]: List PIL images
     """
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
     pages = []
     for page in doc:
         pix = page.get_pixmap(dpi=300)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        img = pix.pil_image()
         pages.append(img)
     return pages
 

@@ -25,6 +25,7 @@ from PIL import Image
 from .ocr_engine import OCR, OcrEngine
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# http://ieeexplore.ieee.org/document/9752204
 class ScanExtractor(BaseExtractor):
     '''Извлекает структуру документа если он отсканирован'''
     def __init__(self, ocr:Optional[OcrEngine]=OcrEngine.TESSERACT, max_workers: int = 4):
@@ -35,11 +36,13 @@ class ScanExtractor(BaseExtractor):
         
         image = page_to_image(page)
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        h_lines, v_lines = find_lines(gray, 200)
+        h_lines, v_lines = find_lines(gray)
 
         mask = h_lines + v_lines
+        Image.fromarray(mask).show()
         # найдем контуры таблиц
-        contours = find_max_contours(mask, max=10)
+        contours = find_max_contours(mask, max=5)
+
         # находим абзацы
         paragraphs = self._extract_paragraph_blocks(gray, contours, margin=5)
 
@@ -66,7 +69,7 @@ class ScanExtractor(BaseExtractor):
             #        |-----------|  
             #  text  |    0.00   |
             # -------|-----------|
-            cells = self._grid_table(x, y, roi_v, roi_h, span_mode=1)
+            cells = self._grid_table(x, y, roi_v, roi_h, span_mode=0)
 
             tables.append(
                 Table(
@@ -80,7 +83,7 @@ class ScanExtractor(BaseExtractor):
         # расширем текст и фон сделаем равномерным белым
         cleaned = cv2.adaptiveThreshold(cleaned, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize=17, C=10)
         # посмотри что получилось
-        Image.fromarray(cleaned).show()
+        # Image.fromarray(cleaned).show()
         
         tasks: List[Tuple[Any, np.ndarray]] = []
         for p in paragraphs:
@@ -88,10 +91,11 @@ class ScanExtractor(BaseExtractor):
             tasks.append((p, roi))
         for tbl in tables:
             for c in tbl.cells:
+                
                 pad_box = c.bbox.padding(2)
                 roi = cleaned[pad_box.y1:pad_box.y2, pad_box.x1:pad_box.x2]
-                # if c.row == 1:
-                #     break
+                
+                    
                 tasks.append((c, roi))
 
         # распараллеливаем вызовы OCR в потоках
@@ -103,8 +107,43 @@ class ScanExtractor(BaseExtractor):
             for fut in as_completed(future_to_obj):
                 obj = future_to_obj[fut]
                 try:
-                    obj.text = fut.result()
-                except Exception:
+                    # Предполагаем, что fut.result() возвращает кортеж (текст, список_боксов_относительно_ROI).
+                    # OCR-движок должен сам корректировать координаты с учетом внутренних преобразований (например, полей).
+                    (ocr_text_result, boxes_from_ocr) = fut.result()
+                    obj.text = ocr_text_result
+
+                    # Определяем координаты верхнего левого угла ROI на странице,
+                    # из которого был извлечен текст для данного obj.
+                    # Эта логика должна соответствовать тому, как создавались ROI в списке tasks.
+                    if isinstance(obj, Paragraph):
+                        # Для абзацев ROI обычно берется из obj.bbox
+                        roi_origin_x_on_page = obj.bbox.x1
+                        roi_origin_y_on_page = obj.bbox.y1
+                    elif isinstance(obj, Cell):
+                        # Для ячеек в вашем коде ROI создается с отступом (padding).
+                        # Например, для ячейки (5,1) используется obj.bbox.padding(2).
+                        # Эта логика должна быть последовательной для всех обрабатываемых ячеек.
+                        CELL_ROI_PADDING = 12 # Это значение должно соответствовать созданию ROI для ячеек
+                        padded_bbox_for_cell_roi = obj.bbox.padding(CELL_ROI_PADDING)
+                        roi_origin_x_on_page = padded_bbox_for_cell_roi.x1
+                        roi_origin_y_on_page = padded_bbox_for_cell_roi.y1
+                    else:
+                        # Неизвестный тип объекта, пропускаем добавление blobs.
+                        # Можно добавить логирование или обработку ошибки.
+                        continue
+
+                    for x_roi, y_roi, w_roi, h_roi in boxes_from_ocr:
+                        # x_roi, y_roi - координаты относительно верхнего левого угла ROI.
+                        # Преобразуем в абсолютные координаты страницы.
+                        abs_x1 = roi_origin_x_on_page + x_roi
+                        abs_y1 = roi_origin_y_on_page + y_roi
+                        abs_x2 = abs_x1 + w_roi # x2 = x1 + ширина
+                        abs_y2 = abs_y1 + h_roi # y2 = y1 + высота
+                        
+                        obj.blobs.append(BBox(x1=abs_x1, y1=abs_y1, x2=abs_x2, y2=abs_y2)) 
+
+                except Exception as e:
+                    print(f"Error processing OCR result for object type {type(obj)} (bbox: {obj.bbox if hasattr(obj, 'bbox') else 'N/A'}). Exception: {e}")
                     obj.text = ''
 
         return paragraphs, tables
@@ -127,8 +166,8 @@ class ScanExtractor(BaseExtractor):
                 cv2.rectangle(gray_for_text_detection, (x, y), (x + w, y + h), (255), -1) # Закрасить белым
 
         # 3. На модифицированном изображении получить маску текстовых регионов
-        text_mask = detected_text(gray_for_text_detection)
-        # Image.fromarray(text_mask).show()
+        text_mask = detected_text(gray_for_text_detection, 50, 30)
+        Image.fromarray(text_mask).show()
 
         # 4. Найти контуры абзацев
         paragraph_cv_contours, _ = cv2.findContours(
@@ -141,7 +180,7 @@ class ScanExtractor(BaseExtractor):
             x, y, w, h = cv2.boundingRect(cnt)
             
             # Игнорируем слишком маленькие контуры
-            if w < 10 or h < 10: # Пороговые значения можно подобрать
+            if w < 20 or h < 20: 
                 continue
             
             pad = 5 # Отступ для bbox абзаца
@@ -241,60 +280,95 @@ class ScanExtractor(BaseExtractor):
         # матрица посещения, чтоб не создавать ячейку дважды
         n_rows, n_cols = len(ys) - 1, len(xs) - 1
         used = [[False]*n_cols for _ in range(n_rows)]
-        margin = 5
-        line_frac = 0.8
+        margin = 0  # Отступ от краев ячейки при проверке линии
+        line_frac = 1.0 # Минимальная доля длины линии относительно высоты/ширины ячейки
+        line_check_thickness = 3 # Толщина области вокруг линии для проверки (в пикселях в каждую сторону)
+        
         cells: list[Cell] = []
-        for r in range(n_rows):
-            for c in range(n_cols):
-                if used[r][c]:
+        for r_idx in range(n_rows):
+            for c_idx in range(n_cols):
+                if used[r_idx][c_idx]:
                     continue
-                # стартовые границы
-                x0, y0 = xs[c], ys[r]
-                x1, y1 = xs[c+1], ys[r+1]
-                col_span = row_span = 1
-                # colspan
-                if span_mode in (0,1):
-                    end_c = c
-                    while end_c + 1 < n_cols:
-                        new_x = xs[end_c+2]
-                        rs, re = y0 + margin, y1 - margin
-                        cs, ce = x0 + margin, new_x - margin
-                        if re <= rs or ce <= cs:
-                            break
-                        region = pure_v[rs:re, cs:ce]
-                        min_len = int((re - rs) * line_frac)
-                        if has_line(region, min_len, axis=0):
-                            break
-                        end_c += 1
-                        x1 = new_x
-                    col_span = end_c - c + 1
-                # rowspan
-                if span_mode in (0,2):
-                    end_r = r
-                    while end_r + 1 < n_rows:
-                        new_y = ys[end_r+2]
-                        rs, re = y0 + margin, new_y - margin
-                        cs, ce = x0 + margin, x1 - margin
-                        if re <= rs or ce <= cs:
-                            break
-                        region = pure_h[rs:re, cs:ce]
-                        min_len = int((ce - cs) * line_frac)
-                        if has_line(region, min_len, axis=1):
-                            break
-                        end_r += 1
-                        y1 = new_y
-                    row_span = end_r - r + 1
-                # помечаем used
-                for rr in range(r, r + row_span):
-                    for cc in range(c, c + col_span):
-                        used[rr][cc] = True
+                
+                # Начальные границы базовой ячейки (координаты относительно ROI таблицы)
+                x0_base_cell, y0_base_cell = xs[c_idx], ys[r_idx]
+                x1_base_cell, y1_base_cell = xs[c_idx+1], ys[r_idx+1]
+                
+                # Текущие границы объединяемой ячейки, будут расширяться
+                current_x1_merged = x1_base_cell
+                current_y1_merged = y1_base_cell
+                
+                col_span = 1
+                # Проверка colspan (объединение столбцов)
+                if span_mode in (0, 1): # 0: оба, 1: только colspan
+                    for next_c in range(c_idx + 1, n_cols):
+                        # Потенциальная вертикальная линия-разделитель находится на xs[next_c]
+                        # Эта линия разделяет столбец (next_c - 1) и столбец next_c
+                        
+                        # Определяем y-диапазон для проверки (высота текущей строки с отступами)
+                        y_check_s = y0_base_cell + margin
+                        y_check_e = y1_base_cell - margin
 
+                        # Определяем x-диапазон (узкая полоса) вокруг потенциальной вертикальной линии xs[next_c]
+                        x_line_candidate_pos = xs[next_c]
+                        x_check_s = max(0, x_line_candidate_pos - line_check_thickness)
+                        x_check_e = min(pure_v.shape[1], x_line_candidate_pos + line_check_thickness + 1) # +1 для среза
+
+                        if y_check_e <= y_check_s or x_check_e <= x_check_s: # Невалидный регион
+                            break
+
+                        # Извлекаем узкую вертикальную полосу из маски вертикальных линий
+                        region_to_check_for_line = pure_v[y_check_s:y_check_e, x_check_s:x_check_e]
+                        
+                        min_len_for_separator = int((y_check_e - y_check_s) * line_frac)
+                        
+                        if has_line(region_to_check_for_line, min_len_for_separator, axis=0): # axis=0 для вертикальной линии
+                            break # Найдена разделяющая линия, прекращаем объединение столбцов
+                        
+                        # Линия не найдена, расширяем colspan
+                        current_x1_merged = xs[next_c + 1] # Обновляем правую границу объединенной ячейки
+                        col_span += 1
+                
+                row_span = 1
+                # Проверка rowspan (объединение строк)
+                if span_mode in (0, 2): # 0: оба, 2: только rowspan
+                    for next_r in range(r_idx + 1, n_rows):
+                        # Потенциальная горизонтальная линия-разделитель находится на ys[next_r]
+                        
+                        # Определяем x-диапазон для проверки (ширина текущей объединенной по столбцам ячейки с отступами)
+                        x_check_s = x0_base_cell + margin
+                        x_check_e = current_x1_merged - margin # Используем current_x1_merged, т.к. colspan уже учтен
+
+                        # Определяем y-диапазон (узкая полоса) вокруг потенциальной горизонтальной линии ys[next_r]
+                        y_line_candidate_pos = ys[next_r]
+                        y_check_s = max(0, y_line_candidate_pos - line_check_thickness)
+                        y_check_e = min(pure_h.shape[0], y_line_candidate_pos + line_check_thickness + 1)
+
+                        if x_check_e <= x_check_s or y_check_e <= y_check_s: # Невалидный регион
+                            break
+                        
+                        region_to_check_for_line = pure_h[y_check_s:y_check_e, x_check_s:x_check_e]
+                        min_len_for_separator = int((x_check_e - x_check_s) * line_frac)
+
+                        if has_line(region_to_check_for_line, min_len_for_separator, axis=1): # axis=1 для горизонтальной линии
+                            break # Найдена разделяющая линия, прекращаем объединение строк
+                        
+                        current_y1_merged = ys[next_r + 1] # Обновляем нижнюю границу
+                        row_span += 1
+                
+                # Помечаем ячейки как использованные
+                for rr in range(r_idx, r_idx + row_span):
+                    for cc in range(c_idx, c_idx + col_span):
+                        if rr < n_rows and cc < n_cols: # Проверка границ для used
+                            used[rr][cc] = True
                 
                 cells.append(
                     Cell(
-                        bbox=BBox(x0 + x, y0 + y, x1 + x, y1 + y),
-                        row=r,
-                        col=c,
+                        # Координаты BBox абсолютные (относительно страницы)
+                        # x0_base_cell, y0_base_cell, current_x1_merged, current_y1_merged - относительно ROI таблицы
+                        bbox=BBox(x0_base_cell + x, y0_base_cell + y, current_x1_merged + x, current_y1_merged + y),
+                        row=r_idx, # Индекс строки оригинальной сетки
+                        col=c_idx, # Индекс столбца оригинальной сетки
                         text='',       
                     )
                 )
