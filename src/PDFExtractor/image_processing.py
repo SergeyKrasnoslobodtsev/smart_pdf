@@ -125,7 +125,7 @@ def find_lines(gray: np.ndarray, scale: int = 50) -> np.ndarray:
     # Создаем маску для поиска кандидатов в таблицы
     # Объединяем горизонтальные и вертикальные линии, чтобы выделить области с сеткой
     table_candidate_mask = cv2.bitwise_or(h_fixed, v_fixed)
-    Image.fromarray(table_candidate_mask).show()
+    # Image.fromarray(table_candidate_mask).show()
 
 
     table_regions = find_max_contours(table_candidate_mask, max=4)
@@ -150,13 +150,14 @@ def find_lines(gray: np.ndarray, scale: int = 50) -> np.ndarray:
         # Применяем фильтрацию к ROI
         # Параметры min_length и min_intersections могут требовать корректировки для ROI
         filtered_roi_h = filter_small_and_isolated(roi_h_fixed.copy(), roi_intersec, min_length=1, min_intersections=1)
-        filtered_roi_v = filter_small_and_isolated(roi_v_fixed.copy(), roi_intersec, min_length=max(10, h // 100), min_intersections=1) # Пример адаптивной min_length
+        filtered_roi_v = filter_small_and_isolated(roi_v_fixed.copy(), roi_intersec, min_length=max(10, h // 100), min_intersections=1)
 
         # Вставляем отфильтрованные ROI обратно в итоговые маски
         # Используем np.maximum, чтобы корректно обработать возможные перекрытия ROI (хотя RETR_EXTERNAL должен их минимизировать)
         h_filtered_final[y:y+h, x:x+w] = np.maximum(h_filtered_final[y:y+h, x:x+w], filtered_roi_h)
         v_filtered_final[y:y+h, x:x+w] = np.maximum(v_filtered_final[y:y+h, x:x+w], filtered_roi_v)
     
+
     return h_filtered_final, v_filtered_final
 
 def filter_small_and_isolated(mask: np.ndarray, intersec: np.ndarray, min_length:int = 120, min_intersections: int = 1):
@@ -165,7 +166,7 @@ def filter_small_and_isolated(mask: np.ndarray, intersec: np.ndarray, min_length
     у которых длина (число пикселей) < min_length
     или число пересечений <= min_intersections.
     """
-
+    
     num_mask_labels, labels_mask, stats_mask, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8) 
     
     output_mask = np.zeros_like(mask, dtype=np.uint8)

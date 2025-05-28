@@ -64,9 +64,19 @@ class TesseractEngine(Engine):
 
     def extract_text(self, image: np.ndarray) -> Tuple[str, List[Tuple[int, int, int, int]]]:
         image = self.preprocess(image)
-        text = pytesseract.image_to_string(image, config=self.cfg)
+        data = pytesseract.image_to_data(image, config=self.cfg, output_type=pytesseract.Output.DICT)
+        
+        words = []
+        # Собираем все распознанные слова
+        # Фильтруем пустые строки и строки с низкой уверенностью (conf < 0 это обычно пропуски)
+        for i in range(len(data['text'])):
+            if int(data['conf'][i]) > -1 and data['text'][i].strip() != '':
+                words.append(data['text'][i])
+        
+        # Объединяем все слова в одну строку через пробел
+        text = " ".join(words)
 
-        boxes = self.detected_text(image)
+        boxes = self.detected_text(image) # Ваш метод для получения bounding boxes блоков
         return (text, boxes)
     
 

@@ -1,9 +1,14 @@
 from abc import ABC
 from dataclasses import dataclass, field
 import enum
+import logging
 from typing import List, Optional, Tuple, Union
 from PIL import Image
 import pymupdf
+
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter 
+from openpyxl.styles import Alignment, Border, Side 
 
 
 @dataclass
@@ -82,6 +87,8 @@ class Cell:
     bbox: BBox
     row: int
     col: int
+    colspan: int
+    rowspan: int
     text: str = None
     blobs: List[BBox] = field(default_factory=list)
 
@@ -230,31 +237,177 @@ class Document:
     pages: List[Page] = field(default_factory=list)
     page_count: int = 0
 
+    def to_excel(self, file_path: str):
+        """
+        Сохраняет все логические таблицы из документа в файл Excel.
+        Таблицы, разделенные параграфами, считаются новыми.
+        Части таблиц без параграфов между ними (даже через страницы) объединяются.
+        Каждая логическая таблица сохраняется на отдельный лист.
+        Ячейки будут иметь рамки.
+
+        Args:
+            file_path (str): Путь для сохранения файла Excel.
+        """
+        wb = Workbook()
+        if "Sheet" in wb.sheetnames:
+            default_sheet = wb["Sheet"]
+            wb.remove(default_sheet)
+
+        all_elements = []
+        for page_data in self.pages:
+            for p_obj in page_data.paragraphs:
+                all_elements.append({'type': 'paragraph', 'obj': p_obj, 
+                                     'page_num': page_data.num_page, 'y1': p_obj.bbox.y1})
+            for t_obj in page_data.tables:
+                if t_obj.cells: 
+                    all_elements.append({'type': 'table', 'obj': t_obj, 
+                                         'page_num': page_data.num_page, 'y1': t_obj.bbox.y1})
+        
+        all_elements.sort(key=lambda x: (x['page_num'], x['y1']))
+
+        logical_tables_cell_lists = []
+        current_accumulated_cells = []
+        current_row_offset = 0
+
+        for element_data in all_elements:
+            el_type = element_data['type']
+            el_obj = element_data['obj']
+
+            if el_type == 'table':
+                table_fragment: Table = el_obj
+                
+                max_rows_in_this_fragment = 0
+                if table_fragment.cells:
+                    for cell in table_fragment.cells:
+                        adjusted_cell = Cell(
+                            bbox=cell.bbox,
+                            row=cell.row + current_row_offset,
+                            col=cell.col,
+                            colspan=cell.colspan,
+                            rowspan=cell.rowspan,
+                            text=cell.text,
+                            blobs=list(cell.blobs)
+                        )
+                        current_accumulated_cells.append(adjusted_cell)
+                        max_rows_in_this_fragment = max(max_rows_in_this_fragment, cell.row + cell.rowspan)
+                
+                current_row_offset += max_rows_in_this_fragment
+            
+            elif el_type == 'paragraph':
+                if current_accumulated_cells:
+                    logical_tables_cell_lists.append(list(current_accumulated_cells))
+                    current_accumulated_cells.clear()
+                    current_row_offset = 0
+
+        if current_accumulated_cells:
+            logical_tables_cell_lists.append(list(current_accumulated_cells))
+
+        if not logical_tables_cell_lists:
+            if not wb.sheetnames:
+                wb.create_sheet(title="NoTablesFound")
+        else:
+            # Определяем стиль границы
+            thin_border_side = Side(border_style="thin", color="000000")
+            cell_border = Border(left=thin_border_side, 
+                                 right=thin_border_side, 
+                                 top=thin_border_side, 
+                                 bottom=thin_border_side)
+
+            for i, final_table_cells in enumerate(logical_tables_cell_lists):
+                sheet_name = f"Table_{i + 1}"
+                if len(sheet_name) > 31: 
+                    sheet_name = f"Tb{i+1}"[:31] 
+                
+                ws = wb.create_sheet(title=sheet_name)
+
+                if not final_table_cells:
+                    continue
+
+                for cell_data in final_table_cells:
+                    start_row_excel = cell_data.row + 1
+                    start_col_excel = cell_data.col + 1
+                    
+                    excel_cell_obj = ws.cell(row=start_row_excel, column=start_col_excel, value=cell_data.text)
+                    
+                    # Применяем рамку ко всем ячейкам, которые будут частью объединенной или одиночной ячейки
+                    # Для объединенных ячеек стиль применяется к верхней левой ячейке диапазона
+                    excel_cell_obj.border = cell_border
+                    excel_cell_obj.alignment = Alignment(wrap_text=True, vertical='top') # Выравнивание по умолчанию
+
+                    if cell_data.rowspan > 1 or cell_data.colspan > 1:
+                        end_row_excel = start_row_excel + cell_data.rowspan - 1
+                        end_col_excel = start_col_excel + cell_data.colspan - 1
+                        try:
+                            ws.merge_cells(start_row=start_row_excel, 
+                                           start_column=start_col_excel, 
+                                           end_row=end_row_excel, 
+                                           end_column=end_col_excel)
+                            # Для объединенных ячеек, стиль рамки и выравнивание уже применены к excel_cell_obj
+                            # Можно добавить специфичное выравнивание для объединенных ячеек, если нужно
+                            excel_cell_obj.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+                        except Exception:
+                            pass 
+                    else: # Для одиночных ячеек рамка и выравнивание уже применены
+                        excel_cell_obj.alignment = Alignment(wrap_text=True, vertical='top') # Уже установлено выше
+
+                for col_idx_ws in range(1, ws.max_column + 1):
+                    column_letter = get_column_letter(col_idx_ws)
+                    ws.column_dimensions[column_letter].autosize = True
+        try:
+            wb.save(file_path)
+        except Exception as e:
+            raise
+
 class BaseExtractor(ABC):
+    def __init__(self):
+        self.logger = logging.getLogger('app.' + __class__.__name__)
 
     def extract(self, pdf_bytes: bytes) -> Document:
-        import pymupdf
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
-        print(f'Is form scan: {doc.is_form_pdf}')
-        page_count = len(doc)
-        pages: List[Page] = []
-        for i in range(page_count):
-            page = doc[i]
-            paragraphs, tables = self._process(page)
-            
-            pages.append(
-                Page(
-                    tables=tables,
-                    paragraphs=paragraphs,
-                    num_page=i
-                )
-            )
+        self.logger.info("Начало процесса извлечения данных из PDF.")
+        if not pdf_bytes:
+            self.logger.error("Получены пустые байты PDF. Прерывание операции.")
+            raise ValueError("pdf_bytes не могут быть пустыми.")
 
-        return Document(
-                    pdf_bytes=pdf_bytes,
-                    pages=pages,
-                    page_count=len(pages)
-        )
+        try:
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+        except Exception as e:
+            self.logger.error(f"Ошибка при открытии PDF документа: {e}", exc_info=True)
+            raise 
+
+        page_count = len(doc)
+        self.logger.info(f"Документ успешно открыт. Количество страниц: {page_count}.")
+        
+        pages_data: List[Page] = []
+        for i in range(page_count):
+            self.logger.info(f"Обработка страницы {i + 1}/{page_count}.")
+            page_content = doc[i]
+            try:
+                paragraphs, tables = self._process(page_content)
+                self.logger.debug(f"Страница {i + 1}: найдено {len(paragraphs)} параграфов и {len(tables)} таблиц.")
+                
+                pages_data.append(
+                    Page(
+                        tables=tables,
+                        paragraphs=paragraphs,
+                        num_page=i
+                    )
+                )
+            except Exception as e:
+                self.logger.error(f"Ошибка при обработке страницы {i + 1}: {e}", exc_info=True)
+
+                pages_data.append(
+                    Page(num_page=i) 
+                )
+                continue 
+
+        self.logger.info("Все страницы обработаны. Формирование итогового документа.")
+        final_document = Document(
+                            pdf_bytes=pdf_bytes,
+                            pages=pages_data,
+                            page_count=len(pages_data)
+                        )
+        self.logger.info("Процесс извлечения данных из PDF завершен.")
+        return final_document
     
     def _process(self, page)-> Tuple[List[Paragraph], List[Table]]:
         ...

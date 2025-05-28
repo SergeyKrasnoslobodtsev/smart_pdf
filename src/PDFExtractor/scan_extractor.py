@@ -1,3 +1,4 @@
+import logging
 from typing import Any, List, Optional, Tuple
 import cv2
 import numpy as np
@@ -31,6 +32,7 @@ class ScanExtractor(BaseExtractor):
     def __init__(self, ocr:Optional[OcrEngine]=OcrEngine.TESSERACT, max_workers: int = 4):
         self.ocr = OCR(ocr_engine=ocr)
         self.max_workers = max_workers
+        self.logger = logging.getLogger('app.' + __class__.__name__)
 
     def _process(self, page) -> Tuple[List[Paragraph], List[Table]]:
         
@@ -44,7 +46,7 @@ class ScanExtractor(BaseExtractor):
         contours = find_max_contours(mask, max=5)
 
         # находим абзацы
-        paragraphs = self._extract_paragraph_blocks(gray, contours, margin=5)
+        paragraphs = self._extract_paragraph_blocks(gray, contours, margin=0)
 
         tables: List[Table] = []
         for x, y, w, h in contours:
@@ -79,11 +81,37 @@ class ScanExtractor(BaseExtractor):
             )
         # Обработаем изображение медианный фильтр избавит от перца (зерна) на изображении
         # также немного сгладит буквы
-        cleaned = cv2.medianBlur(gray, 3)
-        # расширем текст и фон сделаем равномерным белым
-        cleaned = cv2.adaptiveThreshold(cleaned, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize=17, C=10)
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+        # Нормализация значения дисперсии Лапласиана к диапазону [0, 1].
+        # MAX_LAPLACIAN_FOR_NORMALIZATION — это предполагаемое максимальное или типично высокое 
+        # значение дисперсии для четкого изображения в вашем наборе данных. 
+        # Все значения выше этого будут отображены как 1.0.
+        # Это значение требует тщательной калибровки.
+        # Например, если типичные значения для четких изображений в вашем случае около 100-300,
+        # то значение 200-250 может быть отправной точкой. Если значения выше, увеличьте его.
+        MAX_LAPLACIAN_FOR_NORMALIZATION = 200.0  # Пример значения, требует калибровки!
+        
+        normalized_lap_var = laplacian_var / MAX_LAPLACIAN_FOR_NORMALIZATION
+        # Гарантируем, что значение находится в диапазоне [0, 1]
+        normalized_lap_var = min(1.0, max(0.0, normalized_lap_var)) 
+
+        blur_threshold_normalized = 0.8
+
+        self.logger.info(f"Laplacian variance: raw={laplacian_var:.2f}, MAX_FOR_NORMALIZATION={MAX_LAPLACIAN_FOR_NORMALIZATION}, normalized={normalized_lap_var:.4f}")
+
+        if normalized_lap_var < blur_threshold_normalized:
+            self.logger.info(f"Image is considered blurry (normalized_lap_var: {normalized_lap_var:.4f} < {blur_threshold_normalized}). Applying medianBlur and adaptiveThreshold.")
+            cleaned = cv2.medianBlur(gray, 3)
+            # расширем текст и фон сделаем равномерным белым
+            cleaned = cv2.adaptiveThreshold(cleaned, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize=11, C=2)
+        else:
+            self.logger.info(f"Image is considered sharp enough (normalized_lap_var: {normalized_lap_var:.4f} >= {blur_threshold_normalized}). Skipping medianBlur, applying adaptiveThreshold to grayscale.")
+            # Применяем adaptiveThreshold к исходному изображению в градациях серого, если оно достаточно четкое
+            cleaned = gray
+
         # посмотри что получилось
-        # Image.fromarray(cleaned).show()
+        Image.fromarray(cleaned).show()
         
         tasks: List[Tuple[Any, np.ndarray]] = []
         for p in paragraphs:
@@ -167,7 +195,7 @@ class ScanExtractor(BaseExtractor):
 
         # 3. На модифицированном изображении получить маску текстовых регионов
         text_mask = detected_text(gray_for_text_detection, 50, 30)
-        Image.fromarray(text_mask).show()
+        # Image.fromarray(text_mask).show()
 
         # 4. Найти контуры абзацев
         paragraph_cv_contours, _ = cv2.findContours(
@@ -281,7 +309,7 @@ class ScanExtractor(BaseExtractor):
         n_rows, n_cols = len(ys) - 1, len(xs) - 1
         used = [[False]*n_cols for _ in range(n_rows)]
         margin = 0  # Отступ от краев ячейки при проверке линии
-        line_frac = 1.0 # Минимальная доля длины линии относительно высоты/ширины ячейки
+        line_frac = 0.2 # Минимальная доля длины линии относительно высоты/ширины ячейки
         line_check_thickness = 3 # Толщина области вокруг линии для проверки (в пикселях в каждую сторону)
         
         cells: list[Cell] = []
@@ -369,6 +397,8 @@ class ScanExtractor(BaseExtractor):
                         bbox=BBox(x0_base_cell + x, y0_base_cell + y, current_x1_merged + x, current_y1_merged + y),
                         row=r_idx, # Индекс строки оригинальной сетки
                         col=c_idx, # Индекс столбца оригинальной сетки
+                        colspan=col_span,
+                        rowspan=row_span,
                         text='',       
                     )
                 )
