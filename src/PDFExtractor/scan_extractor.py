@@ -41,12 +41,12 @@ class ScanExtractor(BaseExtractor):
         h_lines, v_lines = find_lines(gray)
 
         mask = h_lines + v_lines
-        Image.fromarray(mask).show()
+        # Image.fromarray(mask).show()
         # найдем контуры таблиц
         contours = find_max_contours(mask, max=5)
 
         # находим абзацы
-        paragraphs = self._extract_paragraph_blocks(gray, contours, margin=0)
+        paragraphs = self._extract_paragraph_blocks(gray, contours, margin=2)
 
         tables: List[Table] = []
         for x, y, w, h in contours:
@@ -71,7 +71,7 @@ class ScanExtractor(BaseExtractor):
             #        |-----------|  
             #  text  |    0.00   |
             # -------|-----------|
-            cells = self._grid_table(x, y, roi_v, roi_h, span_mode=0)
+            cells = self._grid_table(x, y, roi_v, roi_h, span_mode=1)
 
             tables.append(
                 Table(
@@ -79,39 +79,11 @@ class ScanExtractor(BaseExtractor):
                     cells=cells, 
                 )
             )
-        # Обработаем изображение медианный фильтр избавит от перца (зерна) на изображении
-        # также немного сгладит буквы
-        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-
-        # Нормализация значения дисперсии Лапласиана к диапазону [0, 1].
-        # MAX_LAPLACIAN_FOR_NORMALIZATION — это предполагаемое максимальное или типично высокое 
-        # значение дисперсии для четкого изображения в вашем наборе данных. 
-        # Все значения выше этого будут отображены как 1.0.
-        # Это значение требует тщательной калибровки.
-        # Например, если типичные значения для четких изображений в вашем случае около 100-300,
-        # то значение 200-250 может быть отправной точкой. Если значения выше, увеличьте его.
-        MAX_LAPLACIAN_FOR_NORMALIZATION = 200.0  # Пример значения, требует калибровки!
-        
-        normalized_lap_var = laplacian_var / MAX_LAPLACIAN_FOR_NORMALIZATION
-        # Гарантируем, что значение находится в диапазоне [0, 1]
-        normalized_lap_var = min(1.0, max(0.0, normalized_lap_var)) 
-
-        blur_threshold_normalized = 0.8
-
-        self.logger.info(f"Laplacian variance: raw={laplacian_var:.2f}, MAX_FOR_NORMALIZATION={MAX_LAPLACIAN_FOR_NORMALIZATION}, normalized={normalized_lap_var:.4f}")
-
-        if normalized_lap_var < blur_threshold_normalized:
-            self.logger.info(f"Image is considered blurry (normalized_lap_var: {normalized_lap_var:.4f} < {blur_threshold_normalized}). Applying medianBlur and adaptiveThreshold.")
-            cleaned = cv2.medianBlur(gray, 3)
-            # расширем текст и фон сделаем равномерным белым
-            cleaned = cv2.adaptiveThreshold(cleaned, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize=11, C=2)
-        else:
-            self.logger.info(f"Image is considered sharp enough (normalized_lap_var: {normalized_lap_var:.4f} >= {blur_threshold_normalized}). Skipping medianBlur, applying adaptiveThreshold to grayscale.")
-            # Применяем adaptiveThreshold к исходному изображению в градациях серого, если оно достаточно четкое
-            cleaned = gray
+        # На простых файлах работает, но нужен алгоритм обработки
+        cleaned = cv2.medianBlur(gray, 3)
 
         # посмотри что получилось
-        Image.fromarray(cleaned).show()
+        # Image.fromarray(cleaned).show()
         
         tasks: List[Tuple[Any, np.ndarray]] = []
         for p in paragraphs:
