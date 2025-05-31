@@ -2,6 +2,13 @@
 from typing import List
 import unittest
 
+import sys # Добавить этот импорт
+import os # Добавить этот импорт
+
+# Добавить путь к корневой папке проекта
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 import common_test
 
